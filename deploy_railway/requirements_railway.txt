@@ -1,0 +1,46 @@
+# Railway-optimized requirements for EmoSense Backend Free Tier
+# Minimal dependencies to fit Railway's memory/storage limits
+
+# Core FastAPI dependencies (essential)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# HTTP and file handling
+httpx==0.25.2
+aiofiles==23.2.1
+
+# Basic ML/NLP (lightweight only)
+nltk==3.8.1
+numpy==1.24.4
+
+# System monitoring (for Railway)
+psutil==5.9.6
+
+# Configuration and logging
+pydantic==2.4.2
+python-dotenv==1.0.0
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Testing (optional)
+pytest==7.4.3
+
+# Optional dependencies that will be used if available
+# (commented out to reduce deployment size)
+# torch==2.1.0
+# transformers==4.35.2 
+# scikit-learn==1.3.2
+# librosa==0.10.1
+# soundfile==0.12.1
+# opencv-python-headless==4.8.1.78
+# pillow==10.1.0
+# textblob==0.17.1
+python-dotenv==1.0.0
+
+# Logging
+structlog==23.2.0
+python-json-logger==2.0.7
+
+# Development tools (optional)
+pytest==7.4.3

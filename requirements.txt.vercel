@@ -1,2 +1,0 @@
-# Use the Vercel-optimized requirements for deployment
--r requirements-vercel.txt
