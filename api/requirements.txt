@@ -1,12 +1,2 @@
-# Core FastAPI dependencies for Vercel serverless deployment
 fastapi==0.104.1
 uvicorn==0.24.0
-python-multipart==0.0.6
-
-# Authentication and Security (simplified)
-python-jose==3.3.0
-passlib==1.7.4
-
-# Configuration and environment
-pydantic==2.4.2
-pydantic-settings==2.0.3
