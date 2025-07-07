@@ -8,11 +8,16 @@ and authentication dependencies for FastAPI endpoints.
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.core.exceptions import AuthenticationError
+from app.database import get_db_session
 
 
 # Get application settings
@@ -20,6 +25,9 @@ settings = get_settings()
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# HTTP Bearer security scheme (optional)
+security = HTTPBearer(auto_error=False)
 
 
 def create_password_hash(password: str) -> str:
@@ -182,14 +190,19 @@ def create_user_tokens(user_id: str, email: str, roles: list = None) -> Dict[str
     Returns:
         Dict[str, str]: Dictionary containing access_token and refresh_token
     """
-    user_data = {
-        "user_id": user_id,
+    # Use 'sub' for subject (user ID) to follow JWT standards
+    access_data = {
+        "sub": user_id,
         "email": email,
         "roles": roles or [],
     }
     
-    access_token = create_access_token(user_data)
-    refresh_token = create_refresh_token({"user_id": user_id})
+    refresh_data = {
+        "sub": user_id,  # Use 'sub' for consistency
+    }
+    
+    access_token = create_access_token(access_data)
+    refresh_token = create_refresh_token(refresh_data)
     
     return {
         "access_token": access_token,
@@ -241,3 +254,65 @@ class PasswordValidator:
             errors.append("Password must contain at least one special character")
         
         return len(errors) == 0, errors
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db_session)
+) -> "User":
+    """
+    Get the current authenticated user from JWT token.
+    
+    Args:
+        credentials: Bearer token credentials
+        db: Database session
+        
+    Returns:
+        User: The authenticated user
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    import uuid
+    from app.models.user import User
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    # Check if credentials are provided
+    if credentials is None:
+        raise credentials_exception
+    
+    try:
+        # Verify the access token
+        payload = verify_token(credentials.credentials, token_type="access")
+        if payload is None:
+            raise credentials_exception
+            
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+            
+        # Convert string UUID to UUID object
+        user_uuid = uuid.UUID(user_id)
+            
+    except (JWTError, ValueError):
+        raise credentials_exception
+    
+    # Get user from database
+    result = await db.execute(select(User).where(User.id == user_uuid))
+    user = result.scalar_one_or_none()
+    
+    if user is None:
+        raise credentials_exception
+        
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User account is disabled"
+        )
+    
+    return user

@@ -8,7 +8,8 @@ for different deployment environments (development, testing, production).
 from functools import lru_cache
 from typing import List, Optional
 
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -48,23 +49,23 @@ class Settings(BaseSettings):
     CACHE_EXPIRE_SECONDS: int = Field(default=3600, env="CACHE_EXPIRE_SECONDS")
     
     # CORS configuration
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:8080"],
+    CORS_ORIGINS: str = Field(
+        default="http://localhost:3000,http://localhost:8080",
         env="CORS_ORIGINS"
     )
-    ALLOWED_HOSTS: List[str] = Field(
-        default=["localhost", "127.0.0.1"],
+    ALLOWED_HOSTS: str = Field(
+        default="localhost,127.0.0.1",
         env="ALLOWED_HOSTS"
     )
     
     # File upload settings
     MAX_FILE_SIZE: int = Field(default=100 * 1024 * 1024, env="MAX_FILE_SIZE")  # 100MB
-    ALLOWED_VIDEO_FORMATS: List[str] = Field(
-        default=["mp4", "avi", "mov", "mkv"],
+    ALLOWED_VIDEO_FORMATS: str = Field(
+        default="mp4,avi,mov,mkv",
         env="ALLOWED_VIDEO_FORMATS"
     )
-    ALLOWED_AUDIO_FORMATS: List[str] = Field(
-        default=["mp3", "wav", "m4a", "flac"],
+    ALLOWED_AUDIO_FORMATS: str = Field(
+        default="mp3,wav,m4a,flac",
         env="ALLOWED_AUDIO_FORMATS"
     )
     UPLOAD_DIRECTORY: str = Field(default="uploads", env="UPLOAD_DIRECTORY")
@@ -100,35 +101,8 @@ class Settings(BaseSettings):
     SMTP_USERNAME: Optional[str] = Field(default=None, env="SMTP_USERNAME")
     SMTP_PASSWORD: Optional[str] = Field(default=None, env="SMTP_PASSWORD")
     
-    @validator("CORS_ORIGINS", pre=True)
-    def parse_cors_origins(cls, value):
-        """Parse CORS origins from string or list."""
-        if isinstance(value, str):
-            return [origin.strip() for origin in value.split(",")]
-        return value
-    
-    @validator("ALLOWED_HOSTS", pre=True)
-    def parse_allowed_hosts(cls, value):
-        """Parse allowed hosts from string or list."""
-        if isinstance(value, str):
-            return [host.strip() for host in value.split(",")]
-        return value
-    
-    @validator("ALLOWED_VIDEO_FORMATS", pre=True)
-    def parse_video_formats(cls, value):
-        """Parse allowed video formats from string or list."""
-        if isinstance(value, str):
-            return [fmt.strip().lower() for fmt in value.split(",")]
-        return [fmt.lower() for fmt in value]
-    
-    @validator("ALLOWED_AUDIO_FORMATS", pre=True)
-    def parse_audio_formats(cls, value):
-        """Parse allowed audio formats from string or list."""
-        if isinstance(value, str):
-            return [fmt.strip().lower() for fmt in value.split(",")]
-        return [fmt.lower() for fmt in value]
-    
-    @validator("ENVIRONMENT")
+    @field_validator("ENVIRONMENT")
+    @classmethod
     def validate_environment(cls, value):
         """Validate environment value."""
         allowed_environments = ["development", "testing", "staging", "production"]
@@ -136,7 +110,8 @@ class Settings(BaseSettings):
             raise ValueError(f"Environment must be one of: {allowed_environments}")
         return value.lower()
     
-    @validator("LOG_LEVEL")
+    @field_validator("LOG_LEVEL")
+    @classmethod
     def validate_log_level(cls, value):
         """Validate log level value."""
         allowed_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -144,11 +119,40 @@ class Settings(BaseSettings):
             raise ValueError(f"Log level must be one of: {allowed_levels}")
         return value.upper()
     
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    # Computed properties for parsed values
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Get CORS origins as a list."""
+        if isinstance(self.CORS_ORIGINS, str):
+            return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+        return self.CORS_ORIGINS
+    
+    @property
+    def allowed_hosts_list(self) -> List[str]:
+        """Get allowed hosts as a list."""
+        if isinstance(self.ALLOWED_HOSTS, str):
+            return [host.strip() for host in self.ALLOWED_HOSTS.split(",")]
+        return self.ALLOWED_HOSTS
+    
+    @property
+    def video_formats_list(self) -> List[str]:
+        """Get video formats as a list."""
+        if isinstance(self.ALLOWED_VIDEO_FORMATS, str):
+            return [fmt.strip().lower() for fmt in self.ALLOWED_VIDEO_FORMATS.split(",")]
+        return self.ALLOWED_VIDEO_FORMATS
+    
+    @property
+    def audio_formats_list(self) -> List[str]:
+        """Get audio formats as a list."""
+        if isinstance(self.ALLOWED_AUDIO_FORMATS, str):
+            return [fmt.strip().lower() for fmt in self.ALLOWED_AUDIO_FORMATS.split(",")]
+        return self.ALLOWED_AUDIO_FORMATS
+    
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": True
+    }
 
 
 @lru_cache()

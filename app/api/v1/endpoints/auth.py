@@ -81,7 +81,23 @@ async def register_user(
         await db.commit()
         await db.refresh(db_user)
         
-        return UserResponse.from_orm(db_user)
+        # Create user response data explicitly to avoid greenlet issues
+        user_data = {
+            "id": db_user.id,
+            "email": db_user.email,
+            "first_name": db_user.first_name,
+            "last_name": db_user.last_name,
+            "phone_number": db_user.phone_number,
+            "bio": db_user.bio,
+            "avatar_url": db_user.avatar_url,
+            "is_active": db_user.is_active,
+            "is_verified": db_user.is_verified,
+            "created_at": db_user.created_at,
+            "updated_at": db_user.updated_at,
+            "last_login": db_user.last_login,
+        }
+        
+        return UserResponse(**user_data)
         
     except ValidationError:
         raise
@@ -139,6 +155,7 @@ async def login_user(
         # Update last login
         user.update_last_login()
         await db.commit()
+        await db.refresh(user)
         
         # Create tokens
         tokens = create_user_tokens(
@@ -147,10 +164,26 @@ async def login_user(
             roles=["user"] + (["admin"] if user.is_superuser else [])
         )
         
+        # Create user response data explicitly to avoid greenlet issues
+        user_data = {
+            "id": user.id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "phone_number": user.phone_number,
+            "bio": user.bio,
+            "avatar_url": user.avatar_url,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "last_login": user.last_login,
+        }
+        
         return UserLoginResponse(
             **tokens,
             expires_in=1800,  # 30 minutes
-            user=UserResponse.from_orm(user)
+            user=UserResponse(**user_data)
         )
         
     except AuthenticationError:
@@ -189,18 +222,25 @@ async def refresh_access_token(
         AuthenticationError: If refresh token is invalid
     """
     try:
+        import uuid
         from app.core.security import verify_token, create_access_token
         
         # Verify refresh token
         payload = verify_token(token_data.refresh_token, token_type="refresh")
-        user_id = payload.get("user_id")
+        user_id = payload.get("sub")  # Use 'sub' like in access tokens
         
         if not user_id:
             raise AuthenticationError("Invalid refresh token")
         
+        # Convert string UUID to UUID object
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            raise AuthenticationError("Invalid user ID in token")
+        
         # Get user from database
         from sqlalchemy import select
-        result = await db.execute(select(User).where(User.id == user_id))
+        result = await db.execute(select(User).where(User.id == user_uuid))
         user = result.scalar_one_or_none()
         
         if not user or not user.is_active:
@@ -208,7 +248,7 @@ async def refresh_access_token(
         
         # Create new access token
         access_token = create_access_token({
-            "user_id": str(user.id),
+            "sub": str(user.id),  # Use 'sub' for consistency
             "email": user.email,
             "roles": ["user"] + (["admin"] if user.is_superuser else [])
         })

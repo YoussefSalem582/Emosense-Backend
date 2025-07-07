@@ -78,7 +78,6 @@ class UserResponse(UserBase):
     """Schema for user response data."""
     
     id: UUID = Field(..., description="User's unique identifier")
-    full_name: str = Field(..., description="User's full name")
     is_active: bool = Field(..., description="Whether the user account is active")
     is_verified: bool = Field(..., description="Whether the user email is verified")
     created_at: datetime = Field(..., description="Account creation timestamp")

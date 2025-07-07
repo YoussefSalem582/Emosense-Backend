@@ -5,6 +5,7 @@ FastAPI application for emotion analysis providing endpoints for text, video,
 and audio emotion detection with user authentication and analytics.
 """
 
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
