@@ -10,12 +10,6 @@ import time
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
-import torch
-from transformers import (
-    AutoTokenizer, 
-    AutoModelForSequenceClassification,
-    pipeline
-)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -53,31 +47,97 @@ class TextEmotionAnalyzer:
         self.db = db
         self.user_id = user_id
         self.model_name = settings.TEXT_MODEL_NAME
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._emotion_pipeline = None
-        self._tokenizer = None
-        self._model = None
-    
-    @property
+        # Sentinel: None = not yet loaded, False = unavailable (use fallback).
+        self._pipeline_loaded = False
+
     async def emotion_pipeline(self):
-        """Lazy load emotion analysis pipeline."""
-        if self._emotion_pipeline is None:
+        """Lazy-load the transformer emotion pipeline.
+
+        Heavy ML dependencies (torch/transformers) and the model weights are
+        imported/loaded only on first use. If they are unavailable (not
+        installed, no network to fetch weights, etc.) this returns ``None`` and
+        callers fall back to a lightweight keyword-based analysis so the API
+        stays functional.
+        """
+        if self._pipeline_loaded:
+            return self._emotion_pipeline
+
+        self._pipeline_loaded = True
+        try:
+            import torch  # noqa: F401
+            from transformers import pipeline
+
+            device = 0 if torch.cuda.is_available() else -1
             try:
                 self._emotion_pipeline = pipeline(
                     "text-classification",
                     model=self.model_name,
-                    device=0 if self.device == "cuda" else -1,
-                    return_all_scores=True
+                    device=device,
+                    top_k=None,
                 )
-            except Exception as e:
-                # Fallback to a basic model if the specified one fails
+            except Exception:
+                # Fallback to a well-known emotion model if the configured one fails.
                 self._emotion_pipeline = pipeline(
                     "text-classification",
                     model="j-hartmann/emotion-english-distilroberta-base",
-                    device=0 if self.device == "cuda" else -1,
-                    return_all_scores=True
+                    device=device,
+                    top_k=None,
                 )
+        except Exception:
+            self._emotion_pipeline = None
+
         return self._emotion_pipeline
+
+    # Lightweight keyword lexicon used when the transformer model is unavailable.
+    _KEYWORD_LEXICON = {
+        EmotionLabel.JOY.value: (
+            "happy", "joy", "glad", "delighted", "pleased", "wonderful",
+            "great", "good", "love", "awesome", "amazing", "fantastic", "enjoy",
+        ),
+        EmotionLabel.SADNESS.value: (
+            "sad", "unhappy", "depressed", "down", "cry", "miserable", "grief",
+            "sorry", "lonely", "hurt", "disappointed",
+        ),
+        EmotionLabel.ANGER.value: (
+            "angry", "mad", "furious", "annoyed", "hate", "rage", "irritated",
+            "frustrated",
+        ),
+        EmotionLabel.FEAR.value: (
+            "afraid", "scared", "fear", "terrified", "anxious", "worried",
+            "nervous", "panic",
+        ),
+        EmotionLabel.SURPRISE.value: (
+            "surprised", "shocked", "amazed", "astonished", "unexpected", "wow",
+        ),
+        EmotionLabel.DISGUST.value: (
+            "disgust", "gross", "nasty", "revolting", "sick", "yuck",
+        ),
+        EmotionLabel.LOVE.value: (
+            "love", "adore", "affection", "caring", "beloved", "cherish",
+        ),
+        EmotionLabel.EXCITEMENT.value: (
+            "excited", "thrilled", "eager", "pumped", "stoked", "can't wait",
+        ),
+    }
+
+    def _keyword_emotion_scores(self, text: str) -> Dict[str, float]:
+        """Estimate emotion scores from keyword matches (model-free fallback)."""
+        lowered = text.lower()
+        counts = {label.value: 0 for label in EmotionLabel}
+
+        for emotion, keywords in self._KEYWORD_LEXICON.items():
+            for word in keywords:
+                counts[emotion] += lowered.count(word)
+
+        total = sum(counts.values())
+        if total == 0:
+            # No signal: default to neutral.
+            scores = {label.value: 0.0 for label in EmotionLabel}
+            scores[EmotionLabel.NEUTRAL.value] = 1.0
+            return scores
+
+        return {emotion: count / total for emotion, count in counts.items()}
     
     def _map_emotion_labels(self, model_output: List[Dict]) -> Dict[str, float]:
         """
@@ -264,12 +324,16 @@ class TextEmotionAnalyzer:
             analysis.update_status(AnalysisStatus.PROCESSING)
             await self.db.commit()
             
-            # Get emotion pipeline
-            pipeline = await self.emotion_pipeline
-            
+            # Get emotion pipeline (falls back to keyword analysis if the
+            # transformer model is unavailable).
+            pipe = await self.emotion_pipeline()
+
             # Analyze overall text
-            model_results = pipeline(text)
-            emotion_scores = self._map_emotion_labels(model_results[0])
+            if pipe is not None:
+                model_results = pipe(text)
+                emotion_scores = self._map_emotion_labels(model_results[0])
+            else:
+                emotion_scores = self._keyword_emotion_scores(text)
             
             # Calculate metrics
             dominant_emotion, confidence = self._get_dominant_emotion(emotion_scores)
@@ -286,10 +350,13 @@ class TextEmotionAnalyzer:
             # Perform segment analysis if requested
             if segment_analysis and len(text) > 100:  # Only for longer texts
                 segments = self._split_text_into_segments(text)
-                
+
                 for i, segment_text in enumerate(segments):
-                    segment_results = pipeline(segment_text)
-                    segment_scores = self._map_emotion_labels(segment_results[0])
+                    if pipe is not None:
+                        segment_results = pipe(segment_text)
+                        segment_scores = self._map_emotion_labels(segment_results[0])
+                    else:
+                        segment_scores = self._keyword_emotion_scores(segment_text)
                     segment_emotion, segment_confidence = self._get_dominant_emotion(segment_scores)
                     
                     segment_analysis_obj = TextSegmentAnalysis(
@@ -311,8 +378,8 @@ class TextEmotionAnalyzer:
             
             await self.db.commit()
             await self.db.refresh(analysis)
-            
-            return EmotionAnalysisResponse.from_orm(analysis)
+
+            return EmotionAnalysisResponse.model_validate(analysis)
             
         except Exception as e:
             # Handle errors
@@ -340,29 +407,21 @@ class TextEmotionAnalyzer:
         Returns:
             List of EmotionAnalysisResponse objects
         """
-        results = []
-        
-        # Process texts concurrently (but limit concurrency to prevent memory issues)
-        semaphore = asyncio.Semaphore(5)  # Process max 5 texts concurrently
-        
-        async def analyze_single_text(text: str) -> EmotionAnalysisResponse:
-            async with semaphore:
-                return await self.analyze_text(
+        # Process sequentially: a single AsyncSession is not safe for concurrent
+        # use, so fan-out concurrency here would corrupt the shared transaction.
+        # (Genuinely parallel batch processing belongs in a Celery worker with
+        # its own session per task — see the Phase 4 roadmap.)
+        successful_results: List[EmotionAnalysisResponse] = []
+        for text in texts:
+            try:
+                result = await self.analyze_text(
                     text=text,
                     confidence_threshold=confidence_threshold,
-                    segment_analysis=False  # Disable for batch processing
+                    segment_analysis=False,  # Disable for batch processing
                 )
-        
-        # Create tasks for all texts
-        tasks = [analyze_single_text(text) for text in texts]
-        
-        # Execute tasks
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Filter out exceptions and return successful results
-        successful_results = []
-        for result in results:
-            if isinstance(result, EmotionAnalysisResponse):
                 successful_results.append(result)
-        
+            except Exception:
+                # Skip failed items; the batch response reports the failed count.
+                continue
+
         return successful_results

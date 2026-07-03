@@ -5,12 +5,15 @@ Handles SQLAlchemy database configuration, connection management,
 and table creation for PostgreSQL database.
 """
 
+import uuid as _uuid
 from typing import AsyncGenerator
 
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
+from sqlalchemy.types import CHAR, TypeDecorator
 
 from app.config import get_settings
 
@@ -18,15 +21,19 @@ from app.config import get_settings
 # Get application settings
 settings = get_settings()
 
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+# Build engine kwargs. SQLite (used for local dev/tests) uses NullPool, which
+# does not accept pool_size/max_overflow; only pass those for real pooled DBs.
+_engine_kwargs = {"echo": settings.DEBUG, "future": True}
+if _is_sqlite:
+    _engine_kwargs["poolclass"] = NullPool
+else:
+    _engine_kwargs["pool_size"] = settings.DATABASE_POOL_SIZE
+    _engine_kwargs["max_overflow"] = settings.DATABASE_MAX_OVERFLOW
+
 # Create async database engine
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=settings.DEBUG,  # Log SQL queries in debug mode
-    pool_size=settings.DATABASE_POOL_SIZE,
-    max_overflow=settings.DATABASE_MAX_OVERFLOW,
-    poolclass=NullPool if "sqlite" in settings.DATABASE_URL else None,
-    future=True,
-)
+engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 
 # Create async session factory
 async_session_factory = async_sessionmaker(
@@ -34,6 +41,39 @@ async_session_factory = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+class GUID(TypeDecorator):
+    """Platform-independent UUID column type.
+
+    Uses PostgreSQL's native ``UUID`` type when available and falls back to
+    ``CHAR(36)`` on other backends (e.g. SQLite for local dev/tests). Values are
+    always exposed to Python as ``uuid.UUID`` objects.
+    """
+
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PG_UUID(as_uuid=True))
+        return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if not isinstance(value, _uuid.UUID):
+            value = _uuid.UUID(str(value))
+        if dialect.name == "postgresql":
+            return value
+        return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if isinstance(value, _uuid.UUID):
+            return value
+        return _uuid.UUID(str(value))
+
 
 # Create declarative base for models
 Base = declarative_base()
@@ -76,7 +116,7 @@ async def create_tables() -> None:
     Should be called during application startup.
     """
     # Import all models to ensure they are registered with Base.metadata
-    from app.models import user, emotion, analysis  # noqa: F401
+    from app.models import user, emotion  # noqa: F401
     
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -118,7 +158,7 @@ class DatabaseManager:
         """
         try:
             async with self.engine.begin() as conn:
-                await conn.execute("SELECT 1")
+                await conn.execute(text("SELECT 1"))
             return True
         except Exception:
             return False
@@ -132,7 +172,7 @@ class DatabaseManager:
         """
         try:
             async with self.engine.begin() as conn:
-                result = await conn.execute("SELECT version()")
+                result = await conn.execute(text("SELECT version()"))
                 version = result.scalar()
                 
                 return {
@@ -163,7 +203,7 @@ class DatabaseManager:
             Use with caution. Only for administrative tasks.
         """
         async with self.engine.begin() as conn:
-            result = await conn.execute(sql)
+            result = await conn.execute(text(sql) if isinstance(sql, str) else sql)
             return result.fetchall()
 
 
