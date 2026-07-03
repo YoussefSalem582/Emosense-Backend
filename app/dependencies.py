@@ -40,12 +40,13 @@ async def get_current_user(
         HTTPException: If authentication fails
     """
     try:
-        # Verify JWT token
+        # Verify JWT token. Tokens are minted with the user id in the standard
+        # JWT "sub" claim (see app.core.security.create_user_tokens).
         token_data = verify_token(credentials.credentials)
-        user_id = token_data.get("user_id")
-        
+        user_id = token_data.get("sub")
+
         if user_id is None:
-            raise AuthenticationError("Invalid token: missing user_id")
+            raise AuthenticationError("Invalid token: missing subject")
         
         # Get user from database
         from sqlalchemy import select
