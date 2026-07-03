@@ -116,7 +116,7 @@ emosense_backend/
    # Create PostgreSQL database
    createdb emosense_db
    
-   # Run migrations (when implemented)
+   # Run migrations
    alembic upgrade head
    ```
 
