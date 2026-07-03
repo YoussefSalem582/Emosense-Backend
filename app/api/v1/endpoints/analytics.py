@@ -50,7 +50,7 @@ async def get_dashboard(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve dashboard data: {str(e)}"
+            detail=f"Failed to retrieve dashboard data"
         )
 
 
@@ -91,7 +91,7 @@ async def get_user_report(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to generate report: {str(e)}"
+            detail=f"Failed to generate report"
         )
 
 
@@ -128,7 +128,7 @@ async def get_usage_statistics(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve usage statistics: {str(e)}"
+            detail=f"Failed to retrieve usage statistics"
         )
 
 
@@ -169,5 +169,5 @@ async def get_emotion_trends(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve emotion trends: {str(e)}"
+            detail=f"Failed to retrieve emotion trends"
         )

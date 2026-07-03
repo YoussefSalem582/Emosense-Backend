@@ -64,7 +64,7 @@ class VideoEmotionAnalyzer:
             
         except Exception as e:
             raise ModelProcessingError(
-                detail=f"Failed to initialize video analysis models: {str(e)}",
+                detail=f"Failed to initialize video analysis models",
                 model_name="video-emotion-analyzer"
             )
     
@@ -144,7 +144,7 @@ class VideoEmotionAnalyzer:
             if isinstance(e, (FileProcessingError, ModelProcessingError)):
                 raise
             raise FileProcessingError(
-                detail=f"Video emotion analysis failed: {str(e)}",
+                detail=f"Video emotion analysis failed",
                 file_name=video_file.filename,
             )
     
@@ -244,7 +244,7 @@ class VideoEmotionAnalyzer:
             raise
         except Exception as e:
             raise FileProcessingError(
-                detail=f"Video processing failed: {str(e)}",
+                detail=f"Video processing failed",
                 file_name=os.path.basename(video_path),
             )
 
@@ -341,7 +341,7 @@ class VideoEmotionAnalyzer:
             
         except Exception as e:
             # Log error but don't fail entire video processing
-            print(f"Frame analysis error at {timestamp}s: {str(e)}")
+            print(f"Frame analysis error at {timestamp}s")
             return None
     
     def _predict_emotions_placeholder(self, image: np.ndarray) -> Dict[str, float]:
@@ -390,7 +390,7 @@ class VideoEmotionAnalyzer:
                 results.append(result)
             except Exception as e:
                 # Log error and continue with next video
-                print(f"Failed to analyze video {video_path}: {str(e)}")
+                print(f"Failed to analyze video {video_path}")
                 continue
         
         return results

@@ -81,7 +81,7 @@ async def get_system_metrics(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve system metrics: {str(e)}"
+            detail=f"Failed to retrieve system metrics"
         )
 
 
@@ -114,7 +114,7 @@ async def get_system_info(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve system information: {str(e)}"
+            detail=f"Failed to retrieve system information"
         )
 
 
@@ -152,7 +152,7 @@ async def clear_cache(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to clear cache: {str(e)}"
+            detail=f"Failed to clear cache"
         )
 
 
@@ -181,4 +181,4 @@ async def get_prometheus_metrics(
         return metrics_text
         
     except Exception as e:
-        return f"# Error generating metrics: {str(e)}"
+        return f"# Error generating metrics"
