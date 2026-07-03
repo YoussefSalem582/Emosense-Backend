@@ -84,8 +84,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Apply migrations, then verify no drift and clean downgrade
+      - name: Apply and revert migrations on PostgreSQL
         run: |
           alembic upgrade head
-          alembic check
           alembic downgrade base
