@@ -151,7 +151,8 @@ media/
 .dockerignore
 
 # Alembic
-alembic/versions/*_*.py
+# NOTE: migration scripts are source and MUST be committed; only ignore caches.
+alembic/versions/__pycache__/
 
 # ML Models (if storing locally)
 models/
