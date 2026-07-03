@@ -7,7 +7,7 @@ and authentication dependencies for FastAPI endpoints.
 
 import uuid
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -17,6 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from app.models.user import User
 from app.core.exceptions import AuthenticationError
 from app.database import get_db_session
 
