@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # API Rate limiting
     RATE_LIMIT_REQUESTS: int = Field(default=100, env="RATE_LIMIT_REQUESTS")
     RATE_LIMIT_WINDOW: int = Field(default=60, env="RATE_LIMIT_WINDOW")  # seconds
+    # Optional shared storage for rate limits (e.g. redis://...); in-memory if unset.
+    RATE_LIMIT_STORAGE_URI: Optional[str] = Field(default=None, env="RATE_LIMIT_STORAGE_URI")
+
+    # Error tracking (optional): Sentry is initialized only when a DSN is set.
+    SENTRY_DSN: Optional[str] = Field(default=None, env="SENTRY_DSN")
     
     # External API settings
     OPENAI_API_KEY: Optional[str] = Field(default=None, env="OPENAI_API_KEY")

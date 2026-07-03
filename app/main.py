@@ -10,15 +10,18 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_client import make_asgi_app
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.exceptions import CustomHTTPException
+from app.core.limiter import limiter
 from app.database import create_tables, get_engine
 
 
@@ -58,6 +61,30 @@ def configure_logging() -> None:
 # Configure structured logging before any logger is used.
 configure_logging()
 logger = structlog.get_logger(__name__)
+
+
+def configure_sentry() -> None:
+    """Initialize Sentry error tracking when a DSN is configured.
+
+    No-op (and no hard dependency) when SENTRY_DSN is unset, so local/dev runs
+    don't require the SDK.
+    """
+    if not settings.SENTRY_DSN:
+        return
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.ENVIRONMENT,
+            traces_sample_rate=0.0,
+        )
+        logger.info("Sentry error tracking enabled")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Failed to initialize Sentry", error=str(exc))
+
+
+configure_sentry()
 
 
 @asynccontextmanager
@@ -128,6 +155,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting (slowapi): register the shared limiter and enforce it globally.
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    """Return a structured 429 when a client exceeds the rate limit."""
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "error": {
+                "code": "RATE_LIMIT_EXCEEDED",
+                "message": "Rate limit exceeded. Please slow down and retry later.",
+            }
+        },
+    )
+
 
 @app.exception_handler(CustomHTTPException)
 async def custom_http_exception_handler(
@@ -155,6 +200,31 @@ async def custom_http_exception_handler(
             }
         },
         headers=exc.headers,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler for unexpected errors.
+
+    Logs the full exception server-side (and to Sentry if configured) but returns
+    a generic message to the client, so internal details are never leaked.
+    """
+    logger.error(
+        "Unhandled exception",
+        method=request.method,
+        url=str(request.url),
+        error=str(exc),
+        exc_info=exc,
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An internal error occurred. Please try again later.",
+            }
+        },
     )
 
 
