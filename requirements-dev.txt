@@ -23,6 +23,7 @@ redis==5.0.1
 slowapi==0.1.9
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # pin: passlib 1.7.4 is incompatible with bcrypt >= 4.1
 
 # Config / logging / misc
 pydantic==2.4.2
