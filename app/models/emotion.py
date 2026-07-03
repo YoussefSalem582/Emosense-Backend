@@ -10,15 +10,14 @@ from enum import Enum
 from typing import Dict, List, Optional
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Enum as SQLEnum, Float, 
+    Boolean, Column, DateTime, Enum as SQLEnum, Float,
     ForeignKey, Integer, JSON, String, Text
 )
-from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 
-from app.database import Base
+from app.database import Base, GUID
 
 
 class AnalysisType(str, Enum):
@@ -63,7 +62,7 @@ class EmotionAnalysis(Base):
     
     # Primary key
     id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
         index=True,
@@ -72,7 +71,7 @@ class EmotionAnalysis(Base):
     
     # User relationship
     user_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -304,14 +303,14 @@ class TextSegmentAnalysis(Base):
     __tablename__ = "text_segment_analyses"
     
     id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4,
         doc="Unique segment analysis identifier"
     )
     
     analysis_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("emotion_analyses.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -374,13 +373,13 @@ class VideoFrameAnalysis(Base):
     __tablename__ = "video_frame_analyses"
     
     id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4
     )
     
     analysis_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("emotion_analyses.id", ondelete="CASCADE"),
         nullable=False,
         index=True
@@ -408,13 +407,13 @@ class AudioSegmentAnalysis(Base):
     __tablename__ = "audio_segment_analyses"
     
     id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         primary_key=True,
         default=uuid.uuid4
     )
     
     analysis_id = Column(
-        UUID(as_uuid=True),
+        GUID(),
         ForeignKey("emotion_analyses.id", ondelete="CASCADE"),
         nullable=False,
         index=True
