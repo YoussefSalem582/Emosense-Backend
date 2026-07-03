@@ -22,11 +22,42 @@ from app.core.exceptions import CustomHTTPException
 from app.database import create_tables, get_engine
 
 
-# Configure structured logging
-logger = structlog.get_logger(__name__)
-
 # Get application settings
 settings = get_settings()
+
+
+def configure_logging() -> None:
+    """Configure structlog once for the whole application.
+
+    Emits JSON in non-debug environments (machine-parseable for log
+    aggregation) and a colorized console renderer during development.
+    """
+    import logging
+
+    renderer = (
+        structlog.dev.ConsoleRenderer()
+        if settings.DEBUG
+        else structlog.processors.JSONRenderer()
+    )
+    structlog.configure(
+        processors=[
+            structlog.contextvars.merge_contextvars,
+            structlog.processors.add_log_level,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
+            renderer,
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(
+            logging.getLevelName(settings.LOG_LEVEL)
+        ),
+        cache_logger_on_first_use=True,
+    )
+
+
+# Configure structured logging before any logger is used.
+configure_logging()
+logger = structlog.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -42,14 +73,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # Startup
     logger.info("Starting EmoSense Backend API", version=settings.VERSION)
-    
-    # Initialize database tables
-    try:
-        await create_tables()
-        logger.info("Database tables initialized successfully")
-    except Exception as e:
-        logger.error("Failed to initialize database", error=str(e))
-        raise
+
+    # Database schema: in production, migrations are managed by Alembic
+    # (`alembic upgrade head`). For local development/testing convenience we
+    # auto-create tables from the models instead.
+    if settings.ENVIRONMENT in ("development", "testing"):
+        try:
+            await create_tables()
+            logger.info("Database tables auto-created for %s", settings.ENVIRONMENT)
+        except Exception as e:
+            logger.error("Failed to initialize database", error=str(e))
+            raise
+    else:
+        logger.info("Skipping auto table creation; run 'alembic upgrade head'")
     
     # Initialize ML models (if needed)
     # TODO: Initialize emotion analysis models here
