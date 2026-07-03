@@ -1,23 +1,30 @@
 """
 Video Emotion Analysis Service for EmoSense Backend API
 
-Provides video-based emotion analysis using computer vision and 
+Provides video-based emotion analysis using computer vision and
 facial emotion recognition techniques.
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
+import time
 from typing import Dict, List, Optional, Tuple
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-import cv2
-import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import FileProcessingError, ModelProcessingError
-from app.models.emotion import EmotionAnalysis, AnalysisType
+from app.models.emotion import (
+    AnalysisStatus,
+    AnalysisType,
+    EmotionAnalysis,
+    EmotionLabel,
+)
 from app.schemas.emotion import EmotionAnalysisResponse, VideoAnalysisRequest
+from app.services.emotion.labels import get_dominant_emotion, standardize_emotions
 
 
 class VideoEmotionAnalyzer:
@@ -45,6 +52,8 @@ class VideoEmotionAnalyzer:
     async def initialize_models(self) -> None:
         """Initialize face detection and emotion recognition models."""
         try:
+            import cv2
+
             # Load face cascade classifier
             cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
             self.face_cascade = cv2.CascadeClassifier(cascade_path)
@@ -61,77 +70,82 @@ class VideoEmotionAnalyzer:
     
     async def analyze_video(
         self,
-        video_file_path: str,
-        frame_interval: float = 1.0,
-        confidence_threshold: float = 0.5,
-        detect_faces: bool = True,
-        max_faces: int = 5
+        video_file,
+        request: VideoAnalysisRequest,
     ) -> EmotionAnalysisResponse:
         """
-        Analyze emotions in video content.
-        
+        Analyze emotions in an uploaded video file.
+
         Args:
-            video_file_path: Path to video file
-            frame_interval: Time interval between analyzed frames (seconds)
-            confidence_threshold: Minimum confidence for emotion predictions
-            detect_faces: Whether to detect and analyze faces
-            max_faces: Maximum number of faces to analyze per frame
-            
+            video_file: Uploaded video (Starlette ``UploadFile``)
+            request: Video analysis options
+
         Returns:
-            EmotionAnalysisResponse with video analysis results
-            
+            EmotionAnalysisResponse with aggregated video analysis results
+
         Raises:
             FileProcessingError: If video processing fails
             ModelProcessingError: If emotion analysis fails
         """
+        start_time = time.time()
+
+        # Persist the upload to a temporary file for OpenCV to read.
+        contents = await video_file.read()
+        suffix = os.path.splitext(video_file.filename or "")[1] or ".mp4"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         try:
+            tmp.write(contents)
+            tmp.flush()
+            tmp.close()
+
             await self.initialize_models()
-            
-            # Process video in background thread
+
+            # Process video in a background thread (OpenCV is blocking).
             results = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
                 self._process_video_sync,
-                video_file_path,
-                frame_interval,
-                confidence_threshold,
-                detect_faces,
-                max_faces
+                tmp.name,
+                request.frame_interval,
+                request.confidence_threshold,
+                request.detect_faces,
+                request.max_faces,
             )
-            
-            # Save analysis results to database
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+        try:
+            emotion_scores = standardize_emotions(results.get("emotions", {}))
+            dominant_emotion, confidence = get_dominant_emotion(emotion_scores)
+
             analysis = EmotionAnalysis(
                 user_id=self.user_id,
                 analysis_type=AnalysisType.VIDEO,
-                input_data={"video_file": os.path.basename(video_file_path)},
-                results=results,
-                confidence_score=results.get("average_confidence", 0.0),
-                metadata={
-                    "frame_interval": frame_interval,
-                    "total_frames": results.get("total_frames", 0),
-                    "analyzed_frames": results.get("analyzed_frames", 0),
-                    "faces_detected": results.get("total_faces", 0)
-                }
+                status=AnalysisStatus.COMPLETED,
+                input_file_name=video_file.filename,
+                input_file_size=len(contents),
+                confidence_threshold=request.confidence_threshold,
+                model_version="video-emotion-analyzer-placeholder",
+                dominant_emotion=dominant_emotion,
+                dominant_emotion_confidence=confidence,
+                emotion_scores=emotion_scores,
+                processing_duration=time.time() - start_time,
             )
-            
+
             self.db.add(analysis)
             await self.db.commit()
             await self.db.refresh(analysis)
-            
-            return EmotionAnalysisResponse(
-                id=analysis.id,
-                analysis_type=analysis.analysis_type,
-                results=analysis.results,
-                confidence_score=analysis.confidence_score,
-                metadata=analysis.metadata,
-                created_at=analysis.created_at
-            )
-            
+
+            return EmotionAnalysisResponse.model_validate(analysis)
+
         except Exception as e:
             if isinstance(e, (FileProcessingError, ModelProcessingError)):
                 raise
             raise FileProcessingError(
                 detail=f"Video emotion analysis failed: {str(e)}",
-                file_type="video"
+                file_name=video_file.filename,
             )
     
     def _process_video_sync(
@@ -156,11 +170,14 @@ class VideoEmotionAnalyzer:
             Dictionary with analysis results
         """
         try:
+            import cv2
+            import numpy as np
+
             cap = cv2.VideoCapture(video_path)
             if not cap.isOpened():
                 raise FileProcessingError(
                     detail="Failed to open video file",
-                    file_type="video"
+                    file_name=os.path.basename(video_path),
                 )
             
             # Get video properties
@@ -223,12 +240,14 @@ class VideoEmotionAnalyzer:
                 "fps": fps
             }
             
+        except FileProcessingError:
+            raise
         except Exception as e:
             raise FileProcessingError(
                 detail=f"Video processing failed: {str(e)}",
-                file_type="video"
+                file_name=os.path.basename(video_path),
             )
-    
+
     def _analyze_frame(
         self,
         frame: np.ndarray,
@@ -251,6 +270,8 @@ class VideoEmotionAnalyzer:
             Frame analysis results or None if no faces detected
         """
         try:
+            import cv2
+
             if not detect_faces:
                 # Analyze entire frame (simplified approach)
                 emotions = self._predict_emotions_placeholder(frame)
@@ -335,14 +356,16 @@ class VideoEmotionAnalyzer:
         Returns:
             Dictionary of emotion predictions
         """
-        # TODO: Replace with actual emotion recognition model
-        # For now, return random emotions as placeholder
+        # TODO: Replace with actual emotion recognition model (see Phase 4).
+        # For now, return random emotions as a placeholder.
+        import numpy as np
+
         emotions = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-        
+
         # Generate random scores that sum to 1.0
         scores = np.random.random(len(emotions))
         scores = scores / scores.sum()
-        
+
         return {emotion: float(score) for emotion, score in zip(emotions, scores)}
     
     async def analyze_video_batch(
