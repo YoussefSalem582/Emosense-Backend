@@ -1,6 +1,7 @@
 # Core FastAPI dependencies
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+gunicorn==21.2.0
 python-multipart==0.0.6
 
 # Database and ORM
@@ -16,6 +17,7 @@ hiredis==2.2.3
 # Authentication and Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # pin: passlib 1.7.4 is incompatible with bcrypt >= 4.1
 slowapi==0.1.9  # rate limiting
 
 # Error tracking (optional; only active when SENTRY_DSN is set)
@@ -71,6 +73,7 @@ mypy==1.7.1
 # Monitoring and logging
 prometheus-client==0.19.0
 structlog==23.2.0
+psutil==5.9.6
 
 # Documentation
 mkdocs==1.5.3

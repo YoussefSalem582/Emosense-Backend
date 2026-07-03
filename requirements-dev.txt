@@ -1,0 +1,48 @@
+# Development / CI dependencies.
+#
+# This is the slim set needed to lint, type-check, run migrations, and run the
+# test suite. It deliberately excludes the heavy ML/CV/audio stack (torch,
+# transformers, opencv, librosa, ...) because those are imported lazily by the
+# analyzers and the tests exercise the keyword-fallback path. Install the full
+# runtime with `pip install -r requirements.txt`.
+
+# Web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database / migrations
+sqlalchemy==2.0.23
+alembic==1.12.1
+aiosqlite==0.19.0
+asyncpg==0.29.0
+psycopg2-binary==2.9.9  # sync driver used by Alembic against PostgreSQL in CI
+
+# Cache / rate-limit / security
+redis==5.0.1
+slowapi==0.1.9
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1  # pin: passlib 1.7.4 is incompatible with bcrypt >= 4.1
+
+# Config / logging / misc
+pydantic==2.4.2
+pydantic-settings==2.0.3
+python-dotenv==1.0.0
+structlog==23.2.0
+python-json-logger==2.0.7
+prometheus-client==0.19.0
+httpx==0.25.2
+email-validator==2.1.0
+phonenumbers==8.13.25
+psutil==5.9.6
+
+# Test & quality tooling
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+pytest-cov==4.1.0
+fakeredis==2.20.1
+flake8==6.1.0
+mypy==1.7.1
+black==23.11.0

@@ -147,8 +147,6 @@ media/
 *.sqlite
 *.sqlite3
 
-# Docker
-.dockerignore
 
 # Alembic
 # NOTE: migration scripts are source and MUST be committed; only ignore caches.
