@@ -5,6 +5,7 @@ Handles JWT token creation, validation, password hashing,
 and authentication dependencies for FastAPI endpoints.
 """
 
+import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
@@ -57,6 +58,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+def _new_jti() -> str:
+    """Generate a unique token identifier (used for revocation/blacklisting)."""
+    return uuid.uuid4().hex
+
+
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a JWT access token.
@@ -75,9 +81,9 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    to_encode.update({"exp": expire, "type": "access"})
+    to_encode.update({"exp": expire, "type": "access", "jti": _new_jti()})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    
+
     return encoded_jwt
 
 
@@ -94,9 +100,9 @@ def create_refresh_token(data: Dict[str, Any]) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
-    to_encode.update({"exp": expire, "type": "refresh"})
+    to_encode.update({"exp": expire, "type": "refresh", "jti": _new_jti()})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    
+
     return encoded_jwt
 
 
@@ -131,8 +137,8 @@ def verify_token(token: str, token_type: str = "access") -> Dict[str, Any]:
         
         return payload
         
-    except JWTError as e:
-        raise AuthenticationError(f"Invalid token: {str(e)}")
+    except JWTError:
+        raise AuthenticationError("Invalid token")
 
 
 def extract_token_data(token: str) -> Dict[str, Any]:
@@ -301,7 +307,13 @@ async def get_current_user(
             
     except (JWTError, ValueError):
         raise credentials_exception
-    
+
+    # Reject tokens revoked via logout (best-effort; no-op without Redis).
+    from app.services.token_blacklist import is_blacklisted
+
+    if await is_blacklisted(payload.get("jti")):
+        raise credentials_exception
+
     # Get user from database
     result = await db.execute(select(User).where(User.id == user_uuid))
     user = result.scalar_one_or_none()
