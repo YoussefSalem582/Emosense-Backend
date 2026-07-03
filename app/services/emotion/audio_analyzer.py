@@ -5,20 +5,26 @@ Provides audio-based emotion analysis using speech processing and
 machine learning techniques for emotional speech recognition.
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
+import time
 from typing import Dict, List, Optional, Tuple
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
-import librosa
-import numpy as np
-import soundfile as sf
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import FileProcessingError, ModelProcessingError
-from app.models.emotion import EmotionAnalysis, AnalysisType
+from app.models.emotion import (
+    AnalysisStatus,
+    AnalysisType,
+    EmotionAnalysis,
+    EmotionLabel,
+)
 from app.schemas.emotion import EmotionAnalysisResponse, AudioAnalysisRequest
+from app.services.emotion.labels import get_dominant_emotion, standardize_emotions
 
 
 class AudioEmotionAnalyzer:
@@ -59,78 +65,82 @@ class AudioEmotionAnalyzer:
     
     async def analyze_audio(
         self,
-        audio_file_path: str,
-        segment_duration: float = 3.0,
-        confidence_threshold: float = 0.5,
-        transcribe_speech: bool = False,
-        language: str = "auto"
+        audio_file,
+        request: AudioAnalysisRequest,
     ) -> EmotionAnalysisResponse:
         """
-        Analyze emotions in audio content.
-        
+        Analyze emotions in an uploaded audio file.
+
         Args:
-            audio_file_path: Path to audio file
-            segment_duration: Duration of audio segments to analyze (seconds)
-            confidence_threshold: Minimum confidence for emotion predictions
-            transcribe_speech: Whether to transcribe speech content
-            language: Language for speech transcription
-            
+            audio_file: Uploaded audio (Starlette ``UploadFile``)
+            request: Audio analysis options
+
         Returns:
-            EmotionAnalysisResponse with audio analysis results
-            
+            EmotionAnalysisResponse with aggregated audio analysis results
+
         Raises:
             FileProcessingError: If audio processing fails
             ModelProcessingError: If emotion analysis fails
         """
+        start_time = time.time()
+
+        # Persist the upload to a temporary file for librosa to read.
+        contents = await audio_file.read()
+        suffix = os.path.splitext(audio_file.filename or "")[1] or ".wav"
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
         try:
+            tmp.write(contents)
+            tmp.flush()
+            tmp.close()
+
             await self.initialize_models()
-            
-            # Process audio in background thread
+
+            # Process audio in a background thread (librosa is blocking).
             results = await asyncio.get_event_loop().run_in_executor(
                 self.executor,
                 self._process_audio_sync,
-                audio_file_path,
-                segment_duration,
-                confidence_threshold,
-                transcribe_speech,
-                language
+                tmp.name,
+                request.segment_duration,
+                request.confidence_threshold,
+                request.transcribe_speech,
+                request.language,
             )
-            
-            # Save analysis results to database
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+        try:
+            emotion_scores = standardize_emotions(results.get("emotions", {}))
+            dominant_emotion, confidence = get_dominant_emotion(emotion_scores)
+
             analysis = EmotionAnalysis(
                 user_id=self.user_id,
                 analysis_type=AnalysisType.AUDIO,
-                input_data={"audio_file": os.path.basename(audio_file_path)},
-                results=results,
-                confidence_score=results.get("average_confidence", 0.0),
-                metadata={
-                    "segment_duration": segment_duration,
-                    "total_duration": results.get("total_duration", 0),
-                    "analyzed_segments": results.get("analyzed_segments", 0),
-                    "transcription_enabled": transcribe_speech,
-                    "language": language
-                }
+                status=AnalysisStatus.COMPLETED,
+                input_file_name=audio_file.filename,
+                input_file_size=len(contents),
+                confidence_threshold=request.confidence_threshold,
+                model_version="audio-emotion-analyzer-placeholder",
+                dominant_emotion=dominant_emotion,
+                dominant_emotion_confidence=confidence,
+                emotion_scores=emotion_scores,
+                processing_duration=time.time() - start_time,
             )
-            
+
             self.db.add(analysis)
             await self.db.commit()
             await self.db.refresh(analysis)
-            
-            return EmotionAnalysisResponse(
-                id=analysis.id,
-                analysis_type=analysis.analysis_type,
-                results=analysis.results,
-                confidence_score=analysis.confidence_score,
-                metadata=analysis.metadata,
-                created_at=analysis.created_at
-            )
-            
+
+            return EmotionAnalysisResponse.model_validate(analysis)
+
         except Exception as e:
             if isinstance(e, (FileProcessingError, ModelProcessingError)):
                 raise
             raise FileProcessingError(
                 detail=f"Audio emotion analysis failed: {str(e)}",
-                file_type="audio"
+                file_name=audio_file.filename,
             )
     
     def _process_audio_sync(
@@ -155,6 +165,9 @@ class AudioEmotionAnalyzer:
             Dictionary with analysis results
         """
         try:
+            import librosa
+            import numpy as np
+
             # Load audio file
             audio_data, sample_rate = librosa.load(audio_path, sr=None)
             total_duration = len(audio_data) / sample_rate
@@ -224,12 +237,14 @@ class AudioEmotionAnalyzer:
                 "audio_features": audio_features
             }
             
+        except FileProcessingError:
+            raise
         except Exception as e:
             raise FileProcessingError(
                 detail=f"Audio processing failed: {str(e)}",
-                file_type="audio"
+                file_name=os.path.basename(audio_path),
             )
-    
+
     def _analyze_audio_segment(
         self,
         segment: np.ndarray,
@@ -305,8 +320,11 @@ class AudioEmotionAnalyzer:
             Dictionary of extracted features
         """
         try:
+            import librosa
+            import numpy as np
+
             features = {}
-            
+
             # Spectral features
             spectral_centroids = librosa.feature.spectral_centroid(y=segment, sr=sample_rate)[0]
             features["spectral_centroid_mean"] = np.mean(spectral_centroids)
@@ -351,8 +369,10 @@ class AudioEmotionAnalyzer:
             Dictionary of audio features
         """
         try:
+            import numpy as np
+
             features = {}
-            
+
             # Basic audio properties
             features["duration"] = len(audio_data) / sample_rate
             features["sample_rate"] = sample_rate
@@ -387,14 +407,16 @@ class AudioEmotionAnalyzer:
         Returns:
             Dictionary of emotion predictions
         """
-        # TODO: Replace with actual audio emotion recognition model
-        # For now, return random emotions as placeholder
+        # TODO: Replace with actual audio emotion recognition model (see Phase 4).
+        # For now, return random emotions as a placeholder.
+        import numpy as np
+
         emotions = ["angry", "disgust", "fear", "happy", "sad", "surprise", "neutral"]
-        
+
         # Generate random scores that sum to 1.0
         scores = np.random.random(len(emotions))
         scores = scores / scores.sum()
-        
+
         return {emotion: float(score) for emotion, score in zip(emotions, scores)}
     
     def _transcribe_segment(self, segment: np.ndarray, sample_rate: int, language: str) -> Optional[str]:
