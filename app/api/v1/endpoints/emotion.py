@@ -5,8 +5,9 @@ Provides endpoints for analyzing emotions in text, video, and audio content.
 Supports both real-time and batch processing with detailed results.
 """
 
+from datetime import datetime
 from typing import List
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,7 +273,7 @@ async def batch_analyze_emotions(
         # Initialize appropriate analyzer based on analysis type
         if request.analysis_type == AnalysisType.TEXT:
             analyzer = TextEmotionAnalyzer(db=db, user_id=current_user.id)
-            batch_result = await analyzer.batch_analyze_text(
+            results = await analyzer.batch_analyze_text(
                 texts=request.inputs,
                 confidence_threshold=request.confidence_threshold
             )
@@ -280,8 +281,20 @@ async def batch_analyze_emotions(
             raise ValidationError(
                 detail=f"Batch analysis not supported for {request.analysis_type}"
             )
-        
-        return batch_result
+
+        total_items = len(request.inputs)
+        completed_items = len(results)
+        failed_items = total_items - completed_items
+
+        return BatchAnalysisResponse(
+            batch_id=uuid4(),
+            total_items=total_items,
+            completed_items=completed_items,
+            failed_items=failed_items,
+            status="completed" if failed_items == 0 else "partial",
+            results=results,
+            created_at=datetime.utcnow(),
+        )
         
     except ValidationError:
         raise
