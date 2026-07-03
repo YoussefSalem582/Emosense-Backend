@@ -21,6 +21,7 @@ exclude = "(alembic/|tests/)"
 minversion = "7.0"
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-ra -q"
 filterwarnings = [
     "ignore::DeprecationWarning",
