@@ -47,6 +47,12 @@ async def get_current_user(
 
         if user_id is None:
             raise AuthenticationError("Invalid token: missing subject")
+
+        # Reject tokens revoked via logout (best-effort; no-op without Redis).
+        from app.services.token_blacklist import is_blacklisted
+
+        if await is_blacklisted(token_data.get("jti")):
+            raise AuthenticationError("Token has been revoked")
         
         # Get user from database
         from sqlalchemy import select
@@ -70,7 +76,7 @@ async def get_current_user(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(e)}",
+            detail=f"Authentication failed",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

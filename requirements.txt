@@ -16,6 +16,10 @@ hiredis==2.2.3
 # Authentication and Security
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+slowapi==0.1.9  # rate limiting
+
+# Error tracking (optional; only active when SENTRY_DSN is set)
+sentry-sdk==1.39.2
 
 # Task processing
 celery==5.3.4

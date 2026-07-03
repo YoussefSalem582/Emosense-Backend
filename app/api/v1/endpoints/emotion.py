@@ -82,7 +82,7 @@ async def analyze_text_emotion(
         raise ValidationError(detail=str(e))
     except Exception as e:
         raise ModelProcessingError(
-            detail=f"Text emotion analysis failed: {str(e)}",
+            detail=f"Text emotion analysis failed",
             model_name="text-emotion-analyzer"
         )
 
@@ -156,7 +156,7 @@ async def analyze_video_emotion(
         raise
     except Exception as e:
         raise ModelProcessingError(
-            detail=f"Video emotion analysis failed: {str(e)}",
+            detail=f"Video emotion analysis failed",
             model_name="video-emotion-analyzer"
         )
 
@@ -230,7 +230,7 @@ async def analyze_audio_emotion(
         raise
     except Exception as e:
         raise ModelProcessingError(
-            detail=f"Audio emotion analysis failed: {str(e)}",
+            detail=f"Audio emotion analysis failed",
             model_name="audio-emotion-analyzer"
         )
 
@@ -300,7 +300,7 @@ async def batch_analyze_emotions(
         raise
     except Exception as e:
         raise ModelProcessingError(
-            detail=f"Batch emotion analysis failed: {str(e)}",
+            detail=f"Batch emotion analysis failed",
             model_name="batch-emotion-analyzer"
         )
 
@@ -355,7 +355,7 @@ async def get_analysis_results(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve analysis: {str(e)}"
+            detail=f"Failed to retrieve analysis"
         )
 
 
@@ -404,5 +404,5 @@ async def list_user_analyses(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve analyses: {str(e)}"
+            detail=f"Failed to retrieve analyses"
         )

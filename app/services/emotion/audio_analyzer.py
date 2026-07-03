@@ -59,7 +59,7 @@ class AudioEmotionAnalyzer:
             
         except Exception as e:
             raise ModelProcessingError(
-                detail=f"Failed to initialize audio analysis models: {str(e)}",
+                detail=f"Failed to initialize audio analysis models",
                 model_name="audio-emotion-analyzer"
             )
     
@@ -139,7 +139,7 @@ class AudioEmotionAnalyzer:
             if isinstance(e, (FileProcessingError, ModelProcessingError)):
                 raise
             raise FileProcessingError(
-                detail=f"Audio emotion analysis failed: {str(e)}",
+                detail=f"Audio emotion analysis failed",
                 file_name=audio_file.filename,
             )
     
@@ -241,7 +241,7 @@ class AudioEmotionAnalyzer:
             raise
         except Exception as e:
             raise FileProcessingError(
-                detail=f"Audio processing failed: {str(e)}",
+                detail=f"Audio processing failed",
                 file_name=os.path.basename(audio_path),
             )
 
@@ -305,7 +305,7 @@ class AudioEmotionAnalyzer:
             
         except Exception as e:
             # Log error but don't fail entire audio processing
-            print(f"Segment analysis error at {start_time}-{end_time}s: {str(e)}")
+            print(f"Segment analysis error at {start_time}-{end_time}s")
             return None
     
     def _extract_segment_features(self, segment: np.ndarray, sample_rate: int) -> Dict[str, float]:
@@ -354,7 +354,7 @@ class AudioEmotionAnalyzer:
             return features
             
         except Exception as e:
-            print(f"Feature extraction error: {str(e)}")
+            print(f"Feature extraction error")
             return {}
     
     def _extract_audio_features(self, audio_data: np.ndarray, sample_rate: int) -> Dict[str, float]:
@@ -392,7 +392,7 @@ class AudioEmotionAnalyzer:
             return features
             
         except Exception as e:
-            print(f"Global feature extraction error: {str(e)}")
+            print(f"Global feature extraction error")
             return {}
     
     def _predict_emotions_from_audio(self, features: Dict[str, float]) -> Dict[str, float]:
@@ -462,7 +462,7 @@ class AudioEmotionAnalyzer:
                 results.append(result)
             except Exception as e:
                 # Log error and continue with next audio file
-                print(f"Failed to analyze audio {audio_path}: {str(e)}")
+                print(f"Failed to analyze audio {audio_path}")
                 continue
         
         return results

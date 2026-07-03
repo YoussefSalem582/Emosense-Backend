@@ -5,13 +5,21 @@ Provides endpoints for user authentication including login, registration,
 token refresh, and password management.
 """
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthenticationError, ValidationError
-from app.core.security import create_user_tokens, verify_password, create_password_hash
+from app.core.security import (
+    create_user_tokens,
+    verify_password,
+    create_password_hash,
+    verify_token,
+)
 from app.database import get_db_session
 from app.models.user import User
+from app.services.token_blacklist import blacklist_token
 from app.schemas.user import (
     UserCreate,
     UserLogin,
@@ -22,8 +30,13 @@ from app.schemas.user import (
 )
 
 
+logger = structlog.get_logger(__name__)
+
 # Create router for authentication endpoints
 router = APIRouter()
+
+# Optional bearer scheme used by logout to read the token being revoked.
+_logout_bearer = HTTPBearer(auto_error=False)
 
 
 @router.post(
@@ -103,9 +116,10 @@ async def register_user(
         raise
     except Exception as e:
         await db.rollback()
+        logger.error("User registration failed", error=str(e), exc_info=e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}"
+            detail="Failed to create user"
         )
 
 
@@ -189,9 +203,10 @@ async def login_user(
     except AuthenticationError:
         raise
     except Exception as e:
+        logger.error("Login failed", error=str(e), exc_info=e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Login failed: {str(e)}"
+            detail="Login failed"
         )
 
 
@@ -261,34 +276,34 @@ async def refresh_access_token(
     except AuthenticationError:
         raise
     except Exception as e:
+        logger.error("Token refresh failed", error=str(e), exc_info=e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Token refresh failed: {str(e)}"
+            detail="Token refresh failed"
         )
 
 
 @router.post(
     "/logout",
-    status_code=status.HTTP_204_NO_CONTENT,
     summary="User Logout",
-    description="Logout user (client should discard tokens)"
+    description="Revoke the current access token so it can no longer be used"
 )
-async def logout_user():
+async def logout_user(
+    credentials: HTTPAuthorizationCredentials = Depends(_logout_bearer),
+):
     """
-    Logout user.
-    
-    Since we're using stateless JWT tokens, logout is handled on the client
-    side by discarding the tokens. This endpoint exists for API completeness.
-    
-    In a production system, you might want to implement token blacklisting
-    using Redis or database storage.
+    Log the user out by revoking their access token.
+
+    The token's ``jti`` is added to a Redis-backed blacklist until it would have
+    expired, so it is rejected by authenticated endpoints from now on. Logout is
+    idempotent: an invalid/expired/missing token is treated as already logged out.
     """
-    # In a stateless JWT system, logout is handled client-side
-    # by discarding the tokens. This endpoint is for API completeness.
-    # 
-    # For enhanced security, you could implement:
-    # - Token blacklisting in Redis
-    # - Short-lived tokens with automatic refresh
-    # - Token revocation lists
-    
+    if credentials:
+        try:
+            payload = verify_token(credentials.credentials)
+            await blacklist_token(payload.get("jti"), payload.get("exp"))
+        except Exception:
+            # Invalid/expired token — nothing to revoke; treat as success.
+            pass
+
     return {"message": "Logout successful"}
