@@ -297,16 +297,51 @@ async def root() -> dict:
     }
 
 
+@app.get("/health/live", tags=["Health"])
+async def liveness() -> dict:
+    """Liveness probe: is the process up? Fast, checks no dependencies.
+
+    Suitable for a Kubernetes livenessProbe / container HEALTHCHECK.
+    """
+    return {"status": "alive"}
+
+
+@app.get("/health/ready", tags=["Health"])
+async def readiness() -> JSONResponse:
+    """Readiness probe: can the app serve traffic (dependencies reachable)?
+
+    Runs the full dependency health check and returns 503 when unhealthy, so
+    load balancers / readinessProbes stop routing until the app recovers.
+    """
+    from app.services.health import get_health_status
+
+    try:
+        health_status = await get_health_status()
+    except Exception as e:
+        logger.error("Readiness check failed", error=str(e))
+        health_status = {"status": "unhealthy", "timestamp": time.time()}
+
+    code = (
+        status.HTTP_200_OK
+        if health_status.get("status") == "healthy"
+        else status.HTTP_503_SERVICE_UNAVAILABLE
+    )
+    return JSONResponse(status_code=code, content=health_status)
+
+
 @app.get("/health", tags=["Health"])
 async def health_check() -> dict:
     """
     Health check endpoint for monitoring and load balancers.
-    
+
+    Retained for backwards compatibility; prefer /health/live (liveness) and
+    /health/ready (readiness).
+
     Returns:
         Health status of the application and its dependencies
     """
     from app.services.health import get_health_status
-    
+
     try:
         health_status = await get_health_status()
         return health_status
@@ -315,7 +350,6 @@ async def health_check() -> dict:
         return {
             "status": "unhealthy",
             "timestamp": time.time(),
-            "error": str(e),
         }
 
 
